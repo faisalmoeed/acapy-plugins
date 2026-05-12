@@ -1,8 +1,9 @@
+## testing
 FROM python:3.13-slim-bookworm AS base
 WORKDIR /usr/src/app
 
 # Install and configure poetry
-USER root
+#USER root
 
 # Install and configure poetry
 WORKDIR /usr/src/app
@@ -36,6 +37,20 @@ USER $user
 
 FROM python:3.13-bookworm
 
+ARG uid=1001
+ARG user=aries
+ARG acapy_name="acapy-agent"
+ARG HOME=/home/$user
+
+# Add aries user
+RUN useradd -U -ms /bin/bash -u $uid $user
+
+# Add local binaries and aliases to path
+ENV PATH="$HOME/.local/bin:$PATH"
+
+# In order to drop the root user, make directories writable for OpenShift
+RUN usermod -a -G 0 $user
+
 WORKDIR /usr/src/app
 COPY --from=base /usr/src/app/.venv /usr/src/app/.venv
 ENV PATH="/usr/src/app/.venv/bin:$PATH"
@@ -46,6 +61,10 @@ COPY sd_jwt_vc/ sd_jwt_vc/
 COPY oid4vc/ oid4vc/
 ADD https://github.com/openwallet-foundation/acapy-plugins.git#main:status_list/status_list/ status_list/
 COPY docker/*.yml ./
+RUN chown -R $user:$user /usr/src/app
+RUN chmod -R g=u /usr/src/app
+
+USER $user
 
 #Install the isomdl library built in the base stage. 
 COPY --from=base /usr/src/app/isomdl-uniffi/python/isomdl_uniffi /usr/src/app/mso_mdoc/isomdl
