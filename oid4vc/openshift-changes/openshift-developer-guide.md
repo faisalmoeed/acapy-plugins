@@ -35,7 +35,7 @@ The `openshift-changes` directory contains configuration and deployment files ta
      3. Search for `ecp-issuing-service` in the catalog.
      4. Select the template for `ecp-issuing-service`.
      5. Click the **Instantiate Template** button.
-     6. When prompted, select your namespace and enter the namespace in the last textbox.
+     6. When prompted, select your namespace, your git repository for acapy-plugins, your branch and enter the namespace in the last textbox.
      7. Click **Create** to instantiate the service.
      8. Once created, go to **Routes** in the OpenShift console.
      9. Look for the `frontend` route and click on it to access the demo frontend.
