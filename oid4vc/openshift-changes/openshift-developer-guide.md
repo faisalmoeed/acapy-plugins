@@ -29,8 +29,7 @@ The `openshift-changes` directory contains configuration and deployment files ta
 
 
 3. **Deploy to OpenShift:**
-   - Use the provided `default.yml` and Dockerfiles to build and deploy your services in OpenShift if deploying manually.
-   - Alternatively, you can deploy using the OpenShift portal as follows:
+   - Deploy using the OpenShift portal as follows:
      1. Go to the OpenShift portal: [https://console-openshift-console.apps.xkh544cb.canadacentral.aroapp.io](https://console-openshift-console.apps.xkh544cb.canadacentral.aroapp.io)
      2. In the left menu, go to **Home** > **Software Catalog**.
      3. Search for `ecp-issuing-service` in the catalog.
