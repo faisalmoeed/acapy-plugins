@@ -45,7 +45,7 @@ wallet-storage-creds: '{"account":"postgres","password":"postgres","admin_accoun
 # wallet-storage-type: default
 # wallet-key: "insecure"
 
-log-level: info
+log-level: debug
 
 # Connections
 debug-connections: true
@@ -53,3 +53,7 @@ auto-accept-invites: true
 auto-accept-requests: true
 auto-ping-connection: true
 auto-respond-messages: true
+
+## Webhook URL
+webhook-url:
+- http://frontend:3002/webhook

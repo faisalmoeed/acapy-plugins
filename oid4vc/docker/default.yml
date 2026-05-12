@@ -32,7 +32,7 @@ wallet-type: askar
 wallet-storage-type: default
 # wallet-key: "insecure, for use in demo only"
 
-log-level: info
+log-level: debug
 
 # Connections
 debug-connections: true
@@ -40,3 +40,7 @@ auto-accept-invites: true
 auto-accept-requests: true
 auto-ping-connection: true
 auto-respond-messages: true
+
+## Webhook URL
+webhook-url:
+- http://frontend:3002/webhook
