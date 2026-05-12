@@ -10,17 +10,17 @@ The `openshift-changes` directory contains configuration and deployment files ta
 | Source (oid4vc/openshift-changes)         | Destination Path                             |
 |-------------------------------------------|----------------------------------------------|
 | `default_openshift.yml`                   | `oid4vc/docker`                              |
-| `Dockerfile.authserver.openshift`         | `oid4vc/auth_server/docker`                  |
 | `Dockerfile.oid4vc.openshift`             | `oid4vc/docker`                              |
-| `entrypoint_authserver_openshift.sh`      | `oid4vc/docker`                              |
+| `Dockerfile.authserver.openshift`         | `oid4vc/auth_server/docker`                  |
+| `entrypoint_authserver_openshift.sh`      | `oid4vc/auth_server/docker`                  |
 
 ## 3. Steps for Developers
 
 1. **Copy OpenShift Files:**
    - Copy `default_openshift.yml` to `oid4vc/docker` (overwrite if exists).
-   - Copy `Dockerfile.authserver.openshift` to `oid4vc/auth_server/docker` (overwrite if exists).
    - Copy `Dockerfile.oid4vc.openshift` to `oid4vc/docker` (overwrite if exists).
-   - Copy `entrypoint_authserver_openshift.sh` to `oid4vc/docker` (overwrite if exists).
+   - Copy `Dockerfile.authserver.openshift` to `oid4vc/auth_server/docker` (overwrite if exists).
+   - Copy `entrypoint_authserver_openshift.sh` to `oid4vc/auth_server/docker` (overwrite if exists).
    - If there are additional files in `openshift-changes`, copy them to the corresponding locations under `oid4vc/docker/` or related subfolders as appropriate.
 
 2. **Verify Configuration:**
