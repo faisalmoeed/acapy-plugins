@@ -8,4 +8,9 @@ AUTHSERVER_NGROK_URL=$(curl --silent "${TUNNEL_ENDPOINT}/api/tunnels" | jq -r '.
 export AUTHSERVER_NGROK_URL
 echo "AUTHSERVER_NGROK_URL: $AUTHSERVER_NGROK_URL"
 
+# Get the demo app tunnel public URL for SSE connections from mobile devices
+DEMO_APP_NGROK_URL=$(curl --silent "${TUNNEL_ENDPOINT}/api/tunnels" | jq -r '.tunnels[] | select(.name == "demo") | .public_url')
+export DEMO_APP_NGROK_URL
+echo "DEMO_APP_NGROK_URL: $DEMO_APP_NGROK_URL"
+
 exec "$@"

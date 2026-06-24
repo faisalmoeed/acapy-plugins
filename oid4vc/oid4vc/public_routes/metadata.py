@@ -18,7 +18,8 @@ from ..cred_processor import CredProcessors
 from ..did_utils import retrieve_or_create_did_jwk
 from ..jwt import jwt_sign
 from ..models.supported_cred import SupportedCredential
-from ..utils import get_first_auth_server
+from ..models.issuer_config import IssuerConfiguration
+from ..utils import get_first_auth_server, get_wallet_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -82,7 +83,24 @@ async def credential_issuer_metadata(request: web.Request):
 
         wallet_id = request.match_info.get("wallet_id")
         subpath = f"/tenant/{wallet_id}" if wallet_id else ""
-        metadata: dict[str, Any] = {"credential_issuer": f"{public_url}{subpath}"}
+        base_url = f"{public_url}{subpath}"
+
+        # Start from persisted IssuerConfiguration fields (display, batch_credential_issuance, etc.)
+        stored_wallet_id = get_wallet_id(context.profile)
+        try:
+            issuer_config = await IssuerConfiguration.retrieve_by_id(
+                session, stored_wallet_id
+            )
+            metadata: dict[str, Any] = issuer_config.issuer_metadata(base_url)
+        except Exception:
+            metadata = {"credential_issuer": base_url}
+
+        # Ensure required endpoint fields are always present (overwrite with live values)
+        metadata["credential_issuer"] = base_url
+        metadata["credential_endpoint"] = f"{base_url}/credential"
+        metadata["notification_endpoint"] = f"{base_url}/notification"
+        metadata["nonce_endpoint"] = f"{base_url}/nonce"
+
         if auth_server:
             # Point directly at the auth server's public URL so the wallet
             # performs OAuth discovery and token requests against the auth server.
@@ -187,6 +205,17 @@ async def openid_configuration(request: web.Request):
         subpath = f"/tenant/{wallet_id}" if wallet_id else ""
         base_url = f"{public_url}{subpath}"
 
+        # Load persisted IssuerConfiguration for OID4VCI-specific fields (display, etc.)
+        stored_wallet_id = get_wallet_id(context.profile)
+        issuer_display = None
+        try:
+            issuer_config = await IssuerConfiguration.retrieve_by_id(
+                session, stored_wallet_id
+            )
+            issuer_display = issuer_config.display
+        except Exception:
+            pass
+
         processors = context.inject(CredProcessors)
         cred_configs = {}
         for supported in credentials_supported:
@@ -232,6 +261,9 @@ async def openid_configuration(request: web.Request):
             # Wallets call this before building a credential proof to get a fresh
             # nonce that ACA-Py validates in the JWT proof `nonce` claim.
             metadata["nonce_endpoint"] = f"{base_url}/nonce"
+
+        if issuer_display:
+            metadata["display"] = issuer_display
 
         if auth_server:
             metadata["authorization_servers"] = [auth_server["public_url"]]

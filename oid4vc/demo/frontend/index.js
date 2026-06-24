@@ -73,6 +73,7 @@ const presentationCache = new NodeCache({ stdTTL: 300, checkperiod: 400 });
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3001";
 const API_KEY = process.env.API_KEY;
 const AUTHSERVER_NGROK_URL = process.env.AUTHSERVER_NGROK_URL;
+const DEMO_APP_NGROK_URL = process.env.DEMO_APP_NGROK_URL;
 const ADMIN_MANAGE_AUTH_TOKEN = process.env.ADMIN_MANAGE_AUTH_TOKEN;
 const TENANT_SECRET = process.env.TENANT_SECRET;
 
@@ -619,6 +620,8 @@ async function issue_mdoc_credential(req, res) {
     family_name,
     given_name,
     birth_date,
+    birth_place,
+    sex,
     issue_date,
     expiry_date,
     issuing_authority,
@@ -626,7 +629,20 @@ async function issue_mdoc_credential(req, res) {
     issuing_country,
     un_distinguishing_sign,
     portrait,
+    resident_address,
+    resident_city,
+    resident_state,
+    resident_postal_code,
+    resident_country,
   } = req.body;
+
+  const sexInt = parseInt(sex, 10);
+  const birthMs = new Date(birth_date).getTime();
+  const nowMs = Date.now();
+  const ageYears = (nowMs - birthMs) / (365.25 * 24 * 60 * 60 * 1000);
+  const age_over_19 = ageYears >= 19;
+  const age_over_21 = ageYears >= 21;
+  const age_over_65 = ageYears >= 65;
 
   const headers = {
     accept: "application/json",
@@ -682,14 +698,24 @@ async function issue_mdoc_credential(req, res) {
           { path: ["org.iso.18013.5.1", "document_number"], display: [{ name: "Document Number", locale: "en-US" }] },
           { path: ["org.iso.18013.5.1", "issuing_country"], display: [{ name: "Issuing Country", locale: "en-US" }] },
           { path: ["org.iso.18013.5.1", "un_distinguishing_sign"], display: [{ name: "UN Distinguishing Sign", locale: "en-US" }] },
-          { path: ["org.iso.18013.5.1", "portrait"], display: [{ name: "Portrait", locale: "en-US" }] }
+          { path: ["org.iso.18013.5.1", "portrait"], display: [{ name: "Portrait", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "age_over_19"], display: [{ name: "Age Over 19", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "age_over_21"], display: [{ name: "Age Over 21", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "age_over_65"], display: [{ name: "Age Over 65", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "birth_place"], display: [{ name: "Birth Place", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "sex"], display: [{ name: "Sex", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "resident_address"], display: [{ name: "Resident Address", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "resident_city"], display: [{ name: "Resident City", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "resident_state"], display: [{ name: "Resident State", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "resident_postal_code"], display: [{ name: "Resident Postal Code", locale: "en-US" }] },
+          { path: ["org.iso.18013.5.1", "resident_country"], display: [{ name: "Resident Country", locale: "en-US" }] }
         ],
         display: [
           {
             name: "Sample Driving License",
             locale: "en-US",
             background_image: {
-              uri: "data:image/png;base64,iVBORw0KGgoAAAANS",
+              uri: "",
               alt_text: "Driver's License Background"
             }
           }
@@ -730,6 +756,16 @@ async function issue_mdoc_credential(req, res) {
           document_number,
           portrait,
           un_distinguishing_sign,
+          age_over_19,
+          age_over_21,
+          age_over_65,
+          birth_place,
+          sex: sexInt,
+          resident_address,
+          resident_city,
+          resident_state,
+          resident_postal_code,
+          resident_country,
         }
       },
       verification_method: issuerDID + "#0",
@@ -1175,6 +1211,256 @@ async function create_mdoc_presentation(req, res) {
   res.send(qrcode);
 }
 
+// DC-API Presentation Flows
+// These mirror the OID4VP flows above but use the W3C Digital Credentials API
+// (navigator.credentials.get) instead of a QR code.  The browser mediates
+// wallet selection; the wallet response is forwarded here for verification.
+
+async function init_jwt_dcapi_presentation(req, res) {
+  const presentationId = req.params.id;
+  const commonHeaders = {
+    accept: "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + token.token,
+  };
+  if (API_KEY) commonHeaders["X-API-KEY"] = API_KEY;
+
+  const fetchApiData = async (url, options) => {
+    const response = await fetch(url, options);
+    return await response.json();
+  };
+
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating Presentation Definition."});
+  const presentationDefinition = {"pres_def": {
+    "id": uuidv4(),
+    "purpose": "Present basic profile info",
+    "format": {
+      "jwt_vc_json": { "alg": ["ES256"] },
+      "jwt_vp_json": { "alg": ["ES256"] },
+      "jwt_vc":      { "alg": ["ES256"] },
+      "jwt_vp":      { "alg": ["ES256"] }
+    },
+    "input_descriptors": [
+      {
+        "id": "4ce7aff1-0234-4f35-9d21-251668a60950",
+        "name": "Profile",
+        "purpose": "Present basic profile info",
+        "constraints": {
+          "fields": [
+            { "name": "name",     "path": ["$.vc.credentialSubject.first_name", "$.credentialSubject.first_name"], "filter": {"type": "string", "pattern": "^.{1,64}$"} },
+            { "name": "lastname", "path": ["$.vc.credentialSubject.last_name",  "$.credentialSubject.last_name"],  "filter": {"type": "string", "pattern": "^.{1,64}$"} }
+          ]
+        }
+      }
+    ]
+  }};
+
+  const presentationDefinitionUrl = `${API_BASE_URL}/oid4vp/presentation-definition`;
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Posting Presentation Definition to: ${presentationDefinitionUrl}`});
+  const presentationDefinitionData = await fetchApiData(presentationDefinitionUrl, {
+    method: "POST", headers: commonHeaders, body: JSON.stringify(presentationDefinition),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Created Presentation Definition ID: ${presentationDefinitionData.pres_def_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: presentationDefinitionData});
+
+  const dcApiRequestUrl = `${API_BASE_URL}/oid4vp/dc-api/request`;
+  const dcApiRequestBody = {
+    pres_def_id: presentationDefinitionData.pres_def_id,
+    vp_formats: {
+      "jwt_vc": { "alg": ["ES256", "EdDSA"] },
+      "jwt_vp": { "alg": ["ES256", "EdDSA"] },
+      "jwt_vc_json": { "alg": ["ES256", "EdDSA"] },
+      "jwt_vp_json": { "alg": ["ES256", "EdDSA"] }
+    },
+  };
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DC-API request."});
+  const dcApiData = await fetchApiData(dcApiRequestUrl, {
+    method: "POST", headers: commonHeaders, body: JSON.stringify(dcApiRequestBody),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `DC-API request created. Presentation ID: ${dcApiData.presentation_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcApiData});
+
+  presentationCache.set(presentationDefinitionData.pres_def_id, {
+    presentationDefinitionData,
+    presentationId,
+  });
+
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    acapy_presentation_id: dcApiData.presentation_id,
+    nonce:      dcApiData.nonce,
+    pres_def:   dcApiData.pres_def,
+    vp_formats: dcApiData.vp_formats,
+  });
+}
+
+async function init_sdjwt_dcapi_presentation(req, res) {
+  const presentationId = req.params.id;
+  const commonHeaders = {
+    accept: "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + token.token,
+  };
+  if (API_KEY) commonHeaders["X-API-KEY"] = API_KEY;
+
+  const fetchApiData = async (url, options) => {
+    const response = await fetch(url, options);
+    return await response.json();
+  };
+
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating Presentation Definition."});
+  const presentationDefinition = {"pres_def": {
+    "id": uuidv4(),
+    "purpose": "Present basic profile info",
+    "input_descriptors": [
+      {
+        "format": { "vc+sd-jwt": {} },
+        "id": "4ce7aff1-0234-4f35-9d21-251668a60950",
+        "name": "Profile",
+        "purpose": "Present basic profile info",
+        "constraints": {
+          "fields": [
+            { "name": "name",     "path": ["$.first_name"], "filter": {"type": "string"} },
+            { "name": "lastname", "path": ["$.last_name"],  "filter": {"type": "string"} }
+          ]
+        }
+      }
+    ]
+  }};
+
+  const presentationDefinitionUrl = `${API_BASE_URL}/oid4vp/presentation-definition`;
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Posting Presentation Definition to: ${presentationDefinitionUrl}`});
+  const presentationDefinitionData = await fetchApiData(presentationDefinitionUrl, {
+    method: "POST", headers: commonHeaders, body: JSON.stringify(presentationDefinition),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Created Presentation Definition ID: ${presentationDefinitionData.pres_def_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: presentationDefinitionData});
+
+  const dcApiRequestUrl = `${API_BASE_URL}/oid4vp/dc-api/request`;
+  const dcApiRequestBody = {
+    pres_def_id: presentationDefinitionData.pres_def_id,
+    vp_formats: { "vc+sd-jwt": {}, "kb+jwt": { "alg": ["ES256", "EdDSA"] } },
+  };
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DC-API request."});
+  const dcApiData = await fetchApiData(dcApiRequestUrl, {
+    method: "POST", headers: commonHeaders, body: JSON.stringify(dcApiRequestBody),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `DC-API request created. Presentation ID: ${dcApiData.presentation_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcApiData});
+
+  presentationCache.set(presentationDefinitionData.pres_def_id, {
+    presentationDefinitionData,
+    presentationId,
+  });
+
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    acapy_presentation_id: dcApiData.presentation_id,
+    nonce:      dcApiData.nonce,
+    pres_def:   dcApiData.pres_def,
+    vp_formats: dcApiData.vp_formats,
+  });
+}
+
+async function init_mdoc_dcapi_presentation(req, res) {
+  const presentationId = req.params.id;
+  const commonHeaders = {
+    accept: "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + token.token,
+  };
+  if (API_KEY) commonHeaders["X-API-KEY"] = API_KEY;
+
+  const fetchApiData = async (url, options) => {
+    const response = await fetch(url, options);
+    return await response.json();
+  };
+
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DCQL Query for mDL age_over_21."});
+  const dcqlQueryUrl = `${API_BASE_URL}/oid4vp/dcql/queries`;
+  const dcqlQueryData = await fetchApiData(dcqlQueryUrl, {
+    method: "POST",
+    headers: commonHeaders,
+    body: JSON.stringify({
+      credentials: [
+        {
+          id: "mDL",
+          format: "mso_mdoc",
+          meta: { doctype_value: "org.iso.18013.5.1.mDL" },
+          claims: [
+            { namespace: "org.iso.18013.5.1", claim_name: "age_over_21" },
+          ],
+        }
+      ]
+    }),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Created DCQL Query ID: ${dcqlQueryData.dcql_query_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcqlQueryData});
+
+  const dcApiRequestUrl = `${API_BASE_URL}/oid4vp/dc-api/request`;
+  const dcApiRequestBody = {
+    dcql_query_id: dcqlQueryData.dcql_query_id,
+    vp_formats: { mso_mdoc: { alg: ["ES256"] } },
+  };
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DC-API request."});
+  const dcApiData = await fetchApiData(dcApiRequestUrl, {
+    method: "POST", headers: commonHeaders, body: JSON.stringify(dcApiRequestBody),
+  });
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `DC-API request created. Presentation ID: ${dcApiData.presentation_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcApiData});
+
+  presentationCache.set(dcqlQueryData.dcql_query_id, {
+    dcqlQueryData,
+    presentationId,
+  });
+
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    acapy_presentation_id: dcApiData.presentation_id,
+    nonce:       dcApiData.nonce,
+    dcql_query:  dcApiData.dcql_query,
+    vp_formats:  dcApiData.vp_formats,
+  });
+}
+
+// Proxy the DC-API wallet response to ACA-Py's existing verification endpoint.
+// The browser POSTs the DigitalCredential.data JSON here; we forward it as
+// form data so the backend verification logic is completely unchanged.
+async function forward_dcapi_response(req, res) {
+  const acapyPresentationId = req.params.presentationId;
+  const credData = req.body;
+
+  const formData = new URLSearchParams();
+  const vpToken = credData.vp_token;
+  formData.append("vp_token",
+    typeof vpToken === "string" ? vpToken : JSON.stringify(vpToken)
+  );
+  if (credData.presentation_submission) {
+    const ps = credData.presentation_submission;
+    formData.append("presentation_submission",
+      typeof ps === "string" ? ps : JSON.stringify(ps)
+    );
+  }
+  if (credData.state) {
+    formData.append("state", credData.state);
+  }
+
+  const responseUrl = `${API_BASE_URL}/oid4vp/response/${acapyPresentationId}`;
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Authorization": "Bearer " + token.token,
+  };
+  if (API_KEY) headers["X-API-KEY"] = API_KEY;
+
+  const result = await fetch(responseUrl, {
+    method: "POST",
+    headers,
+    body: formData.toString(),
+  });
+
+  res.status(result.status).json({});
+}
+
 // ##     ## ######## ##     ## ##     ##
 // ##     ##    ##    ###   ###  ##   ##
 // ##     ##    ##    #### ####   ## ##
@@ -1192,9 +1478,14 @@ async function create_mdoc_presentation(req, res) {
 
 function handleEvents(event_type, req, res) {
   // Send headers indicating that this is an HTMX stream
+  // Reflect the requesting origin so cross-origin SSE works when the page is
+  // served locally (localhost:3002) but the stream URL uses the ngrok public URL.
+  const origin = req.headers.origin || "*";
   res.writeHead(200, {
     "Connection": "keep-alive",
     "Cache-Control": "no-cache",
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
     "Content-Type": "text/event-stream",
   });
 
@@ -1393,6 +1684,12 @@ async function initializeIssuerMetadata() {
             client_id: "client1",
             client_secret: TENANT_SECRET
           }
+        }
+      ],
+      display: [
+        {
+          name: "Ontario",
+          description: "Ontario Issuance Server"
         }
       ]
     };
@@ -1637,6 +1934,36 @@ app.post("/issue", (req, res, next) => {
   // Event Stream for Presentation page
   app.get("/stream/present/:id", (req, res) => {
     handleEvents("presentation", req, res);
+  });
+
+  // DC-API Presentation routes
+  app.get("/present-dcapi/select/:id", (req, res) => {
+    res.render(`present-dcapi/${req.query["credential-type"]}`, {"page": "present-dcapi", "presentationId": req.params.id});
+  });
+
+  app.get("/present-dcapi", (req, res) => {
+    res.render("present-dcapi", {"page": "present-dcapi", "presentationId": uuidv4(), "demoAppUrl": DEMO_APP_NGROK_URL || ""});
+  });
+
+  app.get("/present-dcapi/init/:id", (req, res, next) => {
+    switch(req.query["credential-type"]) {
+      case "jwt":
+        init_jwt_dcapi_presentation(req, res).catch(next);
+        break;
+      case "sdjwt":
+        init_sdjwt_dcapi_presentation(req, res).catch(next);
+        break;
+      case "mdoc":
+        init_mdoc_dcapi_presentation(req, res).catch(next);
+        break;
+      default:
+        res.status(400).send("");
+    }
+  });
+
+  // Browser forwards the DigitalCredential.data response here for verification
+  app.post("/present-dcapi/response/:presentationId", (req, res, next) => {
+    forward_dcapi_response(req, res).catch(next);
   });
 
   // ##      ## ######## ########  ##     ##  #######   #######  ##    ##  ######
