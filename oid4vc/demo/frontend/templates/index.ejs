@@ -85,10 +85,18 @@
               if (!initResp.ok) throw new Error(`Init failed: ${initResp.status}`);
               const initData = await initResp.json();
 
-              const { acapy_presentation_id, nonce, pres_def, dcql_query, vp_formats } = initData;
+              const { acapy_presentation_id, nonce, pres_def, dcql_query, vp_formats, client_id, response_uri } = initData;
 
               // Step 2: Build the OID4VP authorization request object.
-              const requestData = { response_type: "vp_token", nonce };
+              // response_mode "direct_post" causes the wallet to include response_uri in
+              // the mDL session transcript (required for DeviceAuthentication binding).
+              const requestData = {
+                response_type: "vp_token",
+                response_mode: "direct_post",
+                client_id,
+                response_uri,
+                nonce,
+              };
               if (dcql_query)  requestData.dcql_query = dcql_query;
               if (pres_def)    requestData.presentation_definition = pres_def;
               if (vp_formats)  requestData.client_metadata = { vp_formats };
@@ -110,14 +118,18 @@
 
               setStatus('<div style="text-align:center;">Credential received — submitting for verification…</div>');
 
-              // Step 4: Forward the wallet's response to Express, which proxies it
-              // to ACA-Py's existing /oid4vp/response endpoint for verification.
+              // Step 4: Forward the wallet's VP to Express, which proxies it to ACA-Py's
+              // public /oid4vp/response endpoint (port 8082, direct Docker network).
+              // credential.data is a DOMString from Chrome; avoid double-encoding.
+              const credentialBody = typeof credential.data === "string"
+                ? credential.data
+                : JSON.stringify(credential.data);
               const verifyResp = await fetch(
                 `/present-dcapi/response/${acapy_presentation_id}`,
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(credential.data),
+                  body: credentialBody,
                 }
               );
               if (!verifyResp.ok) throw new Error(`Response submission failed: ${verifyResp.status}`);
@@ -125,7 +137,14 @@
               setStatus('<div style="text-align:center;">Verification submitted — awaiting result…</div>');
 
             } catch (e) {
-              setStatus(`<div style="text-align:center; color:red;">DC-API error: ${e.message}</div>`);
+              // "Cancelled" / AbortError means the wallet used direct_post and delivered
+              // the VP via HTTP to the response_uri; the DC-API channel closes with a
+              // cancellation. The SSE stream will update when ACA-Py fires its webhook.
+              if (e.name === "AbortError" || /cancel/i.test(e.message)) {
+                setStatus('<div style="text-align:center;">Credential presented — awaiting verification result…</div>');
+              } else {
+                setStatus(`<div style="text-align:center; color:red;">DC-API error: ${e.message}</div>`);
+              }
             }
           }
         </script>

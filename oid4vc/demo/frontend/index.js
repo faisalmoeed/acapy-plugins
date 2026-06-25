@@ -74,6 +74,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3001";
 const API_KEY = process.env.API_KEY;
 const AUTHSERVER_NGROK_URL = process.env.AUTHSERVER_NGROK_URL;
 const DEMO_APP_NGROK_URL = process.env.DEMO_APP_NGROK_URL;
+const ISSUER_NGROK_URL = process.env.ISSUER_NGROK_URL;
 const ADMIN_MANAGE_AUTH_TOKEN = process.env.ADMIN_MANAGE_AUTH_TOKEN;
 const TENANT_SECRET = process.env.TENANT_SECRET;
 
@@ -1308,37 +1309,32 @@ async function init_sdjwt_dcapi_presentation(req, res) {
     return await response.json();
   };
 
-  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating Presentation Definition."});
-  const presentationDefinition = {"pres_def": {
-    "id": uuidv4(),
-    "purpose": "Present basic profile info",
-    "input_descriptors": [
-      {
-        "format": { "vc+sd-jwt": {} },
-        "id": "4ce7aff1-0234-4f35-9d21-251668a60950",
-        "name": "Profile",
-        "purpose": "Present basic profile info",
-        "constraints": {
-          "fields": [
-            { "name": "name",     "path": ["$.first_name"], "filter": {"type": "string"} },
-            { "name": "lastname", "path": ["$.last_name"],  "filter": {"type": "string"} }
-          ]
+  // Create DCQL query for SD-JWT credential
+  events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DCQL Query for SD-JWT."});
+  const dcqlQueryUrl = `${API_BASE_URL}/oid4vp/dcql/queries`;
+  const dcqlQueryData = await fetchApiData(dcqlQueryUrl, {
+    method: "POST",
+    headers: commonHeaders,
+    body: JSON.stringify({
+      credentials: [
+        {
+          id: "profile",
+          format: "vc+sd-jwt",
+          claims: [
+            { path: ["vct"] },
+            { path: ["family_name"] },
+            { path: ["given_name"] },
+          ],
         }
-      }
-    ]
-  }};
-
-  const presentationDefinitionUrl = `${API_BASE_URL}/oid4vp/presentation-definition`;
-  events.emit(`presentation-${presentationId}`, {type: "message", message: `Posting Presentation Definition to: ${presentationDefinitionUrl}`});
-  const presentationDefinitionData = await fetchApiData(presentationDefinitionUrl, {
-    method: "POST", headers: commonHeaders, body: JSON.stringify(presentationDefinition),
+      ]
+    }),
   });
-  events.emit(`presentation-${presentationId}`, {type: "message", message: `Created Presentation Definition ID: ${presentationDefinitionData.pres_def_id}`});
-  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: presentationDefinitionData});
+  events.emit(`presentation-${presentationId}`, {type: "message", message: `Created DCQL Query ID: ${dcqlQueryData.dcql_query_id}`});
+  events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcqlQueryData});
 
   const dcApiRequestUrl = `${API_BASE_URL}/oid4vp/dc-api/request`;
   const dcApiRequestBody = {
-    pres_def_id: presentationDefinitionData.pres_def_id,
+    dcql_query_id: dcqlQueryData.dcql_query_id,
     vp_formats: { "vc+sd-jwt": {}, "kb+jwt": { "alg": ["ES256", "EdDSA"] } },
   };
   events.emit(`presentation-${presentationId}`, {type: "message", message: "Creating DC-API request."});
@@ -1348,17 +1344,22 @@ async function init_sdjwt_dcapi_presentation(req, res) {
   events.emit(`presentation-${presentationId}`, {type: "message", message: `DC-API request created. Presentation ID: ${dcApiData.presentation_id}`});
   events.emit(`presentation-${presentationId}`, {type: "debug-message", message: "Response data", data: dcApiData});
 
-  presentationCache.set(presentationDefinitionData.pres_def_id, {
-    presentationDefinitionData,
+  presentationCache.set(dcqlQueryData.dcql_query_id, {
+    dcqlQueryData,
     presentationId,
   });
+
+  const tenantSub = WALLET_ID ? `/tenant/${WALLET_ID}` : "";
+  const responseUri = `${ISSUER_NGROK_URL || ""}${tenantSub}/oid4vp/response/${dcApiData.presentation_id}`;
 
   res.setHeader("Content-Type", "application/json");
   res.json({
     acapy_presentation_id: dcApiData.presentation_id,
-    nonce:      dcApiData.nonce,
-    pres_def:   dcApiData.pres_def,
-    vp_formats: dcApiData.vp_formats,
+    nonce:        dcApiData.nonce,
+    client_id:    dcApiData.client_id,
+    dcql_query:   dcApiData.dcql_query,
+    vp_formats:   dcApiData.vp_formats,
+    response_uri: responseUri,
   });
 }
 
@@ -1388,7 +1389,7 @@ async function init_mdoc_dcapi_presentation(req, res) {
           format: "mso_mdoc",
           meta: { doctype_value: "org.iso.18013.5.1.mDL" },
           claims: [
-            { namespace: "org.iso.18013.5.1", claim_name: "age_over_21" },
+            { path: ["org.iso.18013.5.1", "age_over_21"] },
           ],
         }
       ]
@@ -1414,12 +1415,18 @@ async function init_mdoc_dcapi_presentation(req, res) {
     presentationId,
   });
 
+  const tenantSub = WALLET_ID ? `/tenant/${WALLET_ID}` : "";
+  const responseUri = `${ISSUER_NGROK_URL || ""}${tenantSub}/oid4vp/response/${dcApiData.presentation_id}`;
+  logger.info("DC-API mdoc response_uri: %s (ISSUER_NGROK_URL=%s)", responseUri, ISSUER_NGROK_URL);
+
   res.setHeader("Content-Type", "application/json");
   res.json({
     acapy_presentation_id: dcApiData.presentation_id,
-    nonce:       dcApiData.nonce,
-    dcql_query:  dcApiData.dcql_query,
-    vp_formats:  dcApiData.vp_formats,
+    nonce:        dcApiData.nonce,
+    client_id:    dcApiData.client_id,
+    dcql_query:   dcApiData.dcql_query,
+    vp_formats:   dcApiData.vp_formats,
+    response_uri: responseUri,
   });
 }
 
@@ -1445,12 +1452,14 @@ async function forward_dcapi_response(req, res) {
     formData.append("state", credData.state);
   }
 
-  const responseUrl = `${API_BASE_URL}/oid4vp/response/${acapyPresentationId}`;
+  // /oid4vp/response/{id} is a PUBLIC route on port 8082, not the admin API (3001).
+  // In multitenant mode the path includes /tenant/{wallet_id}.
+  const OID4VP_PUBLIC_URL = process.env.OID4VP_PUBLIC_URL || "http://issuer:8082";
+  const tenantSubpath = WALLET_ID ? `/tenant/${WALLET_ID}` : "";
+  const responseUrl = `${OID4VP_PUBLIC_URL}${tenantSubpath}/oid4vp/response/${acapyPresentationId}`;
   const headers = {
     "Content-Type": "application/x-www-form-urlencoded",
-    "Authorization": "Bearer " + token.token,
   };
-  if (API_KEY) headers["X-API-KEY"] = API_KEY;
 
   const result = await fetch(responseUrl, {
     method: "POST",
@@ -1979,9 +1988,7 @@ app.post("/issue", (req, res, next) => {
   // give users up-to-date and realtime info.
 
     app.post("/webhook/*", (req, res, next) => {
-      logger.trace("Webhook received");
-      logger.trace(req.path);
-      logger.trace(JSON.stringify(req.body));
+      logger.info("Webhook received: %s body_keys=%s", req.path, Object.keys(req.body).join(","));
       if (req.path == "/webhook/topic/oid4vci/") {
         // If there's no exchange ID, we can't look up the request
         if (!req.body.exchange_id) return;
@@ -1994,12 +2001,17 @@ app.post("/issue", (req, res, next) => {
         events.emit(`issuance-${exchange.registrationId}`, {type: "webhook", path: req.path, data: req.body});
       }
       if (req.path == "/webhook/topic/oid4vp/") {
-        // Look up by pres_def_id or dcql_query_id
         const lookupId = req.body.pres_def_id || req.body.dcql_query_id;
-        if (!lookupId) return;
+        logger.info("OID4VP webhook: state=%s pres_def_id=%s dcql_query_id=%s lookupId=%s",
+          req.body.state, req.body.pres_def_id, req.body.dcql_query_id, lookupId);
+        if (!lookupId) {
+          logger.warn("OID4VP webhook: no lookupId, dropping");
+          return;
+        }
 
         // Check to see if this belongs to us
         let exchange = presentationCache.get(lookupId);
+        logger.info("OID4VP webhook: cache lookup for %s → %s", lookupId, exchange ? `found (presentationId=${exchange.presentationId})` : "NOT FOUND");
         if (!exchange) return;
 
         // Dispatch event
