@@ -86,11 +86,13 @@ const private_key_pem = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCC
 let jwtVcSupportedCredCreated = false;
 let sdJwtSupportedCredCreated = false;
 let mdocSupportedCredCreated = false;
+let photoIdSupportedCredCreated = false;
 let sdJwtStatusListCreated = false;
 let jwtStatusListCreated = false;
 let jwtVcSupportedCredID = "";
 let sdJwtSupportedCredID = "";
 let mdocSupportedCredID = "";
+let photoIdSupportedCredID = "";
 let jwtStatusListID = "";
 let sdJwtStatusListID = "";
 
@@ -809,6 +811,190 @@ async function issue_mdoc_credential(req, res) {
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Sending offer to user: ${qrcode}`});
   events.emit(`issuance-${req.body.registrationId}`, {type: "qrcode", credentialOffer, exchangeId, qrcode});
   exchangeCache.set(exchangeId, { exchangeId, credentialOffer, mdocSupportedCredID, registrationId: req.body.registrationId });
+
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Begin listening for credential to be issued."});
+}
+
+// Begin Issue Photo ID (mso_mdoc org.iso.23220.1.mID) Credential Flow
+async function issue_photoid_credential(req, res) {
+  res.status(200).send("");
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Received Photo ID credential data from user."});
+
+  console.log("req.body", req.body);
+  const {
+    family_name,
+    given_name,
+    birth_date,
+    birthplace,
+    sex,
+    height,
+    weight,
+    nationality,
+    issue_date,
+    expiry_date,
+    issuing_authority_unicode,
+    issuing_country,
+    issuing_subdivision,
+    document_number,
+    document_type,
+    portrait,
+    resident_address,
+    resident_city,
+    resident_state,
+    resident_postal_code,
+    resident_country,
+  } = req.body;
+
+  const sexInt = sex ? parseInt(sex, 10) : undefined;
+  const birthMs = new Date(birth_date).getTime();
+  const nowMs = Date.now();
+  const ageYears = (nowMs - birthMs) / (365.25 * 24 * 60 * 60 * 1000);
+  const age_over_18 = req.body.age_over_18 === "true" || ageYears >= 18;
+  const age_over_21 = req.body.age_over_21 === "true" || ageYears >= 21;
+
+  const headers = { accept: "application/json" };
+  const commonHeaders = {
+    accept: "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + token.token,
+  };
+  if (API_KEY) {
+    commonHeaders["X-API-KEY"] = API_KEY;
+  }
+
+  axios.defaults.withCredentials = true;
+  axios.defaults.headers.common["Access-Control-Allow-Origin"] = API_BASE_URL;
+  axios.defaults.headers.common["X-API-KEY"] = API_KEY;
+  axios.defaults.headers.common["Authorization"] = "Bearer " + token.token;
+
+  const fetchApiData = async (url, options) => {
+    const response = await fetch(url, options);
+    return await response.json();
+  };
+
+  const createCredentialSupportedUrl = `${API_BASE_URL}/oid4vci/credential-supported/create/mso-mdoc`;
+  const createCredentialSupportedOptions = {
+    method: "POST",
+    headers: commonHeaders,
+    body: JSON.stringify({
+      format: "mso_mdoc",
+      id: "org.iso.23220.1.mID",
+      doctype: "org.iso.23220.1.mID",
+      signing_key_id: photoIdKeyId,
+      cryptographic_binding_methods_supported: ["jwk"],
+      credential_signing_alg_values_supported: ["ES256"],
+      proof_types_supported: {
+        jwt: { proof_signing_alg_values_supported: ["ES256"] }
+      },
+      credential_metadata: {
+        claims: [
+          { path: ["org.iso.23220.1", "family_name"],             display: [{ name: "Family Name",        locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "given_name"],              display: [{ name: "Given Name",         locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "birth_date"],              display: [{ name: "Birth Date",         locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "issue_date"],              display: [{ name: "Issue Date",         locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "expiry_date"],             display: [{ name: "Expiry Date",        locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "issuing_authority_unicode"], display: [{ name: "Issuing Authority",locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "document_number"],         display: [{ name: "Document Number",   locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "issuing_country"],         display: [{ name: "Issuing Country",   locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "portrait"],                display: [{ name: "Portrait",          locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "sex"],                     display: [{ name: "Sex",               locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "birthplace"],              display: [{ name: "Birthplace",        locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "nationality"],             display: [{ name: "Nationality",       locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "resident_address"],        display: [{ name: "Resident Address",  locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "resident_city"],           display: [{ name: "Resident City",     locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "resident_state"],          display: [{ name: "Resident State",    locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "resident_postal_code"],    display: [{ name: "Resident Postal Code", locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "resident_country"],        display: [{ name: "Resident Country",  locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "age_over_18"],             display: [{ name: "Age Over 18",       locale: "en-US" }] },
+          { path: ["org.iso.23220.1", "age_over_21"],             display: [{ name: "Age Over 21",       locale: "en-US" }] },
+        ],
+        display: [
+          {
+            name: "Photo ID",
+            locale: "en-US",
+            background_color: "#1a3a5c",
+            text_color: "#FFFFFF",
+          }
+        ],
+      },
+    }),
+  };
+
+  if (!photoIdSupportedCredCreated) {
+    events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Create Credential Request to: ${createCredentialSupportedUrl}`});
+    events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: createCredentialSupportedOptions});
+    console.log("Creating Photo ID supported credential", createCredentialSupportedOptions);
+    const supportedCredentialData = await fetchApiData(
+      createCredentialSupportedUrl,
+      createCredentialSupportedOptions
+    );
+    photoIdSupportedCredID = supportedCredentialData.supported_cred_id;
+    photoIdSupportedCredCreated = true;
+  }
+
+  logger.info(photoIdSupportedCredID);
+
+  // Build credential_subject — omit optional fields when blank
+  const photoidSubject = {
+    family_name,
+    given_name,
+    birth_date,
+    portrait,
+    issue_date,
+    expiry_date,
+    issuing_country,
+    issuing_authority_unicode,
+    document_number,
+    ...(sexInt !== undefined && !isNaN(sexInt) ? { sex: sexInt } : {}),
+    ...(birthplace ? { birthplace } : {}),
+    ...(height ? { height: parseInt(height, 10) } : {}),
+    ...(weight ? { weight: parseInt(weight, 10) } : {}),
+    ...(nationality ? { nationality } : {}),
+    ...(resident_address ? { resident_address } : {}),
+    ...(resident_city ? { resident_city } : {}),
+    ...(resident_state ? { resident_state } : {}),
+    ...(resident_postal_code ? { resident_postal_code } : {}),
+    ...(resident_country ? { resident_country } : {}),
+    ...(issuing_subdivision ? { issuing_subdivision } : {}),
+    ...(document_type ? { document_type } : {}),
+    age_over_18,
+    age_over_21,
+  };
+
+  const exchangeCreateUrl = `${API_BASE_URL}/oid4vci/exchange/create`;
+  const exchangeCreateOptions = {
+    supported_cred_id: photoIdSupportedCredID,
+    credential_subject: {
+      "org.iso.23220.1": photoidSubject,
+    },
+    verification_method: issuerDID + "#0",
+  };
+
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Generating Credential Exchange."});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Posting Credential Exchange Creation Request to: ${exchangeCreateUrl}`});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: exchangeCreateOptions});
+
+  const exchangeResponse = await axios.post(exchangeCreateUrl, exchangeCreateOptions);
+  const exchangeId = exchangeResponse.data.exchange_id;
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Received Credential Exchange ID: ${exchangeId}`});
+
+  const credentialOfferUrl = `${API_BASE_URL}/oid4vci/credential-offer`;
+  const queryParams = { exchange_id: exchangeId, user_pin_required: false };
+  const credentialOfferOptions = { params: queryParams, headers };
+
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Requesting Credential Offer."});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Retrieving Credential Offer from: ${credentialOfferUrl}`});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "debug-message", message: "Request options", data: credentialOfferOptions});
+
+  const offerResponse = await axios.get(credentialOfferUrl, credentialOfferOptions);
+  const credentialOffer = offerResponse.data;
+  const qrcode = credentialOffer.credential_offer || credentialOffer.credential_offer_uri;
+
+  logger.info(JSON.stringify(offerResponse.data));
+  logger.info(exchangeId);
+  events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: `Sending offer to user: ${qrcode}`});
+  events.emit(`issuance-${req.body.registrationId}`, {type: "qrcode", credentialOffer, exchangeId, qrcode});
+  exchangeCache.set(exchangeId, { exchangeId, credentialOffer, photoIdSupportedCredID, registrationId: req.body.registrationId });
 
   events.emit(`issuance-${req.body.registrationId}`, {type: "message", message: "Begin listening for credential to be issued."});
 }
@@ -1744,6 +1930,7 @@ async function initializeSigningDid() {
 
 // Import Certificate and private key.
 let mdocKeyId = null;
+let photoIdKeyId = null;
 async function initializeMdocSigningKey() {
   try {
     const commonHeaders = {
@@ -1785,10 +1972,38 @@ async function initializeMdocSigningKey() {
   }
 }
 
+async function initializePhotoIdSigningKey() {
+  try {
+    const commonHeaders = {
+      accept: "application/json",
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token.token,
+    }
+    const createKeyUrl = `${API_BASE_URL}/mso-mdoc/signing-keys/import`;
+    const createKeyOptions = {
+      method: "POST",
+      headers: commonHeaders,
+      body: JSON.stringify({
+          "certificate_pem": certificate_pem,
+          "private_key_pem": private_key_pem,
+          "doctype": "org.iso.23220.1.mID",
+          "label": "Photo ID signing key",
+      }),
+    };
+    logger.info(`Importing Photo ID Signing Key to: ${createKeyUrl}`);
+    const keyData = await fetchApiData(createKeyUrl, createKeyOptions);
+    photoIdKeyId = keyData.id;
+    logger.info(`Imported Photo ID signing key with ID: ${photoIdKeyId}`);
+  } catch (err) {
+    logger.error("Photo ID signing key initialization failed:", err?.response?.data || err.message);
+  }
+}
+
 await initializeAuthServer();
 await initializeIssuerMetadata();
 await initializeSigningDid();
 await initializeMdocSigningKey();
+await initializePhotoIdSigningKey();
 
 
 // Credential Info route
@@ -1898,6 +2113,9 @@ app.post("/issue", (req, res, next) => {
         break;
       case "mdoc":
         issue_mdoc_credential(req, res).catch(next);
+      break;
+      case "photoid":
+        issue_photoid_credential(req, res).catch(next);
       break;
       default:
         res.status(400).send("");

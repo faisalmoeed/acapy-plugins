@@ -56,6 +56,20 @@ MDL_MANDATORY_FIELDS = (
     "un_distinguishing_sign",
 )
 
+# ISO 23220-1 mandatory data elements for the org.iso.23220.1 namespace.
+# These are non-Option fields in the upstream isomdl OrgIso232201 struct.
+PHOTOID_MANDATORY_FIELDS = (
+    "family_name",
+    "given_name",
+    "birth_date",
+    "portrait",
+    "issue_date",
+    "expiry_date",
+    "issuing_country",
+    "issuing_authority_unicode",
+    "document_number",
+)
+
 
 def _prepare_mdl_namespaces(
     payload: Mapping[str, Any],
@@ -95,6 +109,33 @@ def _prepare_mdl_namespaces(
     aamva_items_json = json.dumps(aamva_payload) if aamva_payload else None
 
     return json.dumps(mdl_items), aamva_items_json
+
+
+def _prepare_photoid_namespaces(
+    payload: Mapping[str, Any],
+) -> str:
+    """Prepare ISO 23220-1 photo ID namespace items for create_and_sign_photoid.
+
+    Args:
+        payload: The credential payload (may be wrapped under "org.iso.23220.1").
+
+    Returns:
+        JSON-serialized dict of org.iso.23220.1 namespace elements.
+
+    Raises:
+        ValueError: If any ISO 23220-1 mandatory data element is missing.
+    """
+    photoid_payload = payload.get("org.iso.23220.1", payload)
+    photoid_items = {k: v for k, v in photoid_payload.items()}
+
+    missing = [f for f in PHOTOID_MANDATORY_FIELDS if f not in photoid_items]
+    if missing:
+        raise ValueError(
+            f"Photo ID credential_subject is missing mandatory ISO 23220-1 "
+            f"data element(s): {', '.join(missing)}"
+        )
+
+    return json.dumps(photoid_items)
 
 
 def _prepare_generic_namespaces(doctype: str, payload: Mapping[str, Any]) -> dict:
@@ -176,6 +217,17 @@ def isomdl_mdoc_sign(
             mdoc = Mdoc.create_and_sign_mdl(
                 mdl_items,
                 aamva_items,
+                holder_jwk,
+                signing_cert_pem,
+                iaca_key_pem,
+            )
+        elif doctype == "org.iso.23220.1.mID":
+            # Use the dedicated photo ID constructor — enforces ISO 23220-1
+            # namespace types (BirthDate map, CountryCode, etc.) via OrgIso232201.
+            photoid_items = _prepare_photoid_namespaces(payload)
+            LOGGER.info("Creating photo ID mdoc via create_and_sign_photoid")
+            mdoc = Mdoc.create_and_sign_photoid(
+                photoid_items,
                 holder_jwk,
                 signing_cert_pem,
                 iaca_key_pem,
