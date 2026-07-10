@@ -24,14 +24,11 @@ RUN mkdir mso_mdoc/isomdl
 COPY pyproject.toml poetry.lock README.md ./
 RUN poetry install --without dev --all-extras
 
-# Build isomdl from the local fork.
-# Before building, create a symlink so the source is inside the build context (oid4vc/):
-#   ln -sf ../../isomdl-uniffi /path/to/acapy-plugins/oid4vc/isomdl-uniffi
-# isomdl-uniffi/ is git-ignored in oid4vc/.gitignore.
-RUN apt-get update && apt-get install -y build-essential && apt-get clean
-COPY isomdl-uniffi/ /usr/src/app/isomdl-uniffi/
-# Original Indicio repo clone (re-enable when a PyPI wheel is available):
-# RUN apt-get update && apt-get install -y git build-essential && apt-get clean
+# Build isomdl-uniffi from the timbl-ont fork (includes ISO 23220-1 namespace support).
+# Switch back to the Indicio clone below when a PyPI wheel is available.
+RUN apt-get update && apt-get install -y git build-essential && apt-get clean
+RUN git clone --branch main https://github.com/timbl-ont/isomdl.git isomdl-uniffi
+# Original Indicio repo clone:
 # RUN git clone https://github.com/Indicio-tech/isomdl-uniffi.git
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
