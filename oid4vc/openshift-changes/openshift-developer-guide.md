@@ -50,4 +50,3 @@ The `openshift-changes` directory contains configuration and deployment files ta
 
 ---
 
-For further assistance, contact the maintainers listed in `MAINTAINERS.md`.
