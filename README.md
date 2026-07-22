@@ -1,10 +1,15 @@
-# ACA-Py Plugins
+# How to run the demo
 
-This repository contains approved and tested plugins for [ACA-Py]. This is to encourage collaboration and sharing of useful features not directly included in ACA-Py.
+1. cd to ./oid4vc/demo
+2. cp .env.example .env
+3. edit .env to add the ngrok key (as per notes below)
+4. podman compose up
 
-[ACA-Py]: https://aca-py.org
+Then go to http://localhost:3002 and select "Issue Credential" --> "mDL".  You can add a custom portrait by base64_url encoding the image and pasting it into the form.
 
-## Developer Notes
+Test issuance to the Animo Paradym wallet from the app store.
+
+You need to add an ngrok key in .env. It has to be a paid licence. Due to recent changes (in April) you can't create three tunnels for one agent without a paid account. There is a todo to fix this and Indicio may take it on. The change by NGROK has broken many demos.
 
 The easiest way to develop and test ACA-Py plugins is to use the DevContainer configured in this repository.
 
