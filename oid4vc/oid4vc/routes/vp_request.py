@@ -2,6 +2,7 @@
 
 import json
 import re
+from secrets import token_urlsafe
 from typing import List
 from urllib.parse import quote
 
@@ -21,10 +22,12 @@ from marshmallow import fields
 
 from ..config import Config
 from ..did_utils import retrieve_or_create_did_jwk
+from ..models.dcql_query import DCQLQuery
 from ..models.presentation import (
     OID4VPPresentation,
     OID4VPPresentationSchema,
 )
+from ..models.presentation_definition import OID4VPPresDef
 from ..models.request import (
     OID4VPRequest,
     OID4VPRequestSchema,
@@ -170,6 +173,107 @@ async def create_oid4vp_request(request: web.Request):
             "presentation": pres_record.serialize(),
         }
     )
+
+
+class CreateOID4VPDcApiReqResponseSchema(OpenAPISchema):
+    """Response schema for creating an OID4VP DC-API Request."""
+
+    presentation_id = fields.Str(required=True)
+    nonce = fields.Str(required=True)
+    client_id = fields.Str(required=True)
+    vp_formats = fields.Dict(required=True)
+    pres_def = fields.Dict(required=False, load_default=None)
+    dcql_query = fields.Dict(required=False, load_default=None)
+
+
+@docs(
+    tags=["oid4vp"],
+    summary="Create an OID4VP request for the W3C Digital Credentials API.",
+)
+@request_schema(CreateOID4VPReqRequestSchema)
+@response_schema(CreateOID4VPDcApiReqResponseSchema)
+async def create_oid4vp_dc_api_request(request: web.Request):
+    """Create an OID4VP request for use with navigator.credentials.get() (DC-API).
+
+    Unlike the standard QR-code flow, the nonce is set immediately and the raw
+    request parameters are returned for inline embedding in the DC-API call.
+    No request_uri round-trip is involved; the browser mediates wallet selection.
+    """
+    context: AdminRequestContext = request["context"]
+    body = await request.json()
+
+    async with context.session() as session:
+        jwk = await retrieve_or_create_did_jwk(session)
+        storage = session.inject(BaseStorage)
+        try:
+            x509_record = await storage.get_record(
+                X509_IDENTITY_RECORD_TYPE, X509_IDENTITY_RECORD_ID
+            )
+            x509_id = json.loads(x509_record.value)
+        except StorageNotFoundError:
+            x509_id = None
+
+        if x509_id:
+            effective_client_id = f"x509_san_dns:{x509_id['client_id']}"
+        else:
+            effective_client_id = jwk.did
+
+        pres_def_content = None
+        dcql_query_content = None
+
+        if pres_def_id := body.get("pres_def_id"):
+            req_record = OID4VPRequest(
+                pres_def_id=pres_def_id, vp_formats=body["vp_formats"]
+            )
+            await req_record.save(session=session)
+
+            pres_def_record = await OID4VPPresDef.retrieve_by_id(session, pres_def_id)
+            pres_def_content = pres_def_record.pres_def
+
+            pres_record = OID4VPPresentation(
+                pres_def_id=pres_def_id,
+                state=OID4VPPresentation.REQUEST_RETRIEVED,
+                request_id=req_record.request_id,
+                client_id=effective_client_id,
+                nonce=token_urlsafe(16),
+            )
+            await pres_record.save(session=session)
+
+        elif dcql_query_id := body.get("dcql_query_id"):
+            req_record = OID4VPRequest(
+                dcql_query_id=dcql_query_id, vp_formats=body["vp_formats"]
+            )
+            await req_record.save(session=session)
+
+            dcql_query_record = await DCQLQuery.retrieve_by_id(session, dcql_query_id)
+            dcql_query_content = dcql_query_record.record_value
+
+            pres_record = OID4VPPresentation(
+                dcql_query_id=dcql_query_id,
+                state=OID4VPPresentation.REQUEST_RETRIEVED,
+                request_id=req_record.request_id,
+                client_id=effective_client_id,
+                nonce=token_urlsafe(16),
+            )
+            await pres_record.save(session=session)
+
+        else:
+            raise web.HTTPBadRequest(
+                reason="One of pres_def_id or dcql_query_id must be provided"
+            )
+
+    response = {
+        "presentation_id": pres_record.presentation_id,
+        "nonce": pres_record.nonce,
+        "client_id": effective_client_id,
+        "vp_formats": body["vp_formats"],
+    }
+    if pres_def_content is not None:
+        response["pres_def"] = pres_def_content
+    if dcql_query_content is not None:
+        response["dcql_query"] = dcql_query_content
+
+    return web.json_response(response)
 
 
 class OID4VPRequestQuerySchema(OpenAPISchema):

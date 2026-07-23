@@ -30,6 +30,9 @@ uv.lock
 # UniFFI generated bindings (now use GitHub package)
 **/uniffi_scratch/
 
+# Local isomdl-uniffi symlink/copy used as Docker build context — do not commit
+isomdl-uniffi/
+
 # IDE
 .vscode/
 .idea/

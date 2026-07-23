@@ -1,9 +1,9 @@
 services:
   issuer:
     image: oid4vc
-    build: 
-      dockerfile: docker/Dockerfile
+    build:
       context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "3000:3000"
       - "3001:3001"
